@@ -1,8 +1,14 @@
 const sqlite3 = require("sqlite3").verbose();
 const path = require("path");
+const fs = require("fs");
 
-const dbPath = path.join(__dirname, "..", "database", "blog.db");
+const databaseDir = path.join(__dirname, "..", "database");
 
+if (!fs.existsSync(databaseDir)) {
+    fs.mkdirSync(databaseDir, { recursive: true });
+}
+
+const dbPath = path.join(databaseDir, "blog.db");
 const db = new sqlite3.Database(dbPath, (err) => {
     if (err) {
         console.error("Database connection failed:", err);
