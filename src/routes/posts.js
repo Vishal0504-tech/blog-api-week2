@@ -3,6 +3,25 @@ const db = require("../database");
 
 const router = express.Router();
 
+// =====================================================
+// CACHE CONFIGURATION
+// =====================================================
+
+let postsCache = null;
+let postsCacheTime = 0;
+
+const CACHE_TTL = 5000; // Cache valid for 5 seconds
+
+
+// =====================================================
+// CACHE HELPER
+// =====================================================
+
+function invalidatePostsCache() {
+    postsCache = null;
+    postsCacheTime = 0;
+}
+
 
 // =====================================================
 // 1. CREATE POST
@@ -15,17 +34,17 @@ router.post("/", (req, res) => {
 
     // Validate required fields
     if (
-    typeof title !== "string" ||
-    typeof content !== "string" ||
-    !title.trim() ||
-    !content.trim() ||
-    !Number.isInteger(userId) ||
-    userId <= 0
-) {
+        typeof title !== "string" ||
+        typeof content !== "string" ||
+        !title.trim() ||
+        !content.trim() ||
+        !Number.isInteger(userId) ||
+        userId <= 0
+    ) {
         return res.status(400).json({
-    success: false,
-    message: "Valid title, content and userId are required"
-});
+            success: false,
+            message: "Valid title, content and userId are required"
+        });
     }
 
     // Check whether user exists
@@ -52,9 +71,11 @@ router.post("/", (req, res) => {
 
             // Insert post
             db.run(
-                `INSERT INTO posts
+                `
+                INSERT INTO posts
                 (title, content, user_id)
-                VALUES (?, ?, ?)`,
+                VALUES (?, ?, ?)
+                `,
                 [title, content, userId],
                 function (err) {
 
@@ -66,6 +87,9 @@ router.post("/", (req, res) => {
                             message: "Failed to create post"
                         });
                     }
+
+                    // Invalidate cache because data changed
+                    invalidatePostsCache();
 
                     res.status(201).json({
                         success: true,
@@ -90,6 +114,29 @@ router.post("/", (req, res) => {
 // =====================================================
 
 router.get("/", (req, res) => {
+
+    const now = Date.now();
+
+    // -------------------------------------------------
+    // CHECK CACHE
+    // -------------------------------------------------
+
+    if (
+        postsCache &&
+        (now - postsCacheTime < CACHE_TTL)
+    ) {
+
+        return res.status(200).json({
+            success: true,
+            data: postsCache,
+            cached: true
+        });
+    }
+
+
+    // -------------------------------------------------
+    // CACHE MISS - FETCH FROM DATABASE
+    // -------------------------------------------------
 
     db.all(
         `
@@ -118,9 +165,23 @@ router.get("/", (req, res) => {
                 });
             }
 
+
+            // -------------------------------------------------
+            // STORE RESULT IN CACHE
+            // -------------------------------------------------
+
+            postsCache = posts;
+            postsCacheTime = Date.now();
+
+
+            // -------------------------------------------------
+            // SEND RESPONSE
+            // -------------------------------------------------
+
             res.status(200).json({
                 success: true,
-                data: posts
+                data: posts,
+                cached: false
             });
         }
     );
@@ -136,12 +197,14 @@ router.get("/:id", (req, res) => {
 
     const postId = Number(req.params.id);
 
+    // Validate ID
     if (!Number.isInteger(postId) || postId <= 0) {
         return res.status(400).json({
             success: false,
             message: "Invalid post ID"
         });
     }
+
 
     db.get(
         `
@@ -170,12 +233,14 @@ router.get("/:id", (req, res) => {
                 });
             }
 
+
             if (!post) {
                 return res.status(404).json({
                     success: false,
                     message: "Post not found"
                 });
             }
+
 
             res.status(200).json({
                 success: true,
@@ -196,6 +261,8 @@ router.put("/:id", (req, res) => {
     const postId = Number(req.params.id);
     const { title, content } = req.body;
 
+
+    // Validate ID
     if (!Number.isInteger(postId) || postId <= 0) {
         return res.status(400).json({
             success: false,
@@ -203,12 +270,20 @@ router.put("/:id", (req, res) => {
         });
     }
 
-    if (!title || !content) {
+
+    // Validate title and content
+    if (
+        typeof title !== "string" ||
+        typeof content !== "string" ||
+        !title.trim() ||
+        !content.trim()
+    ) {
         return res.status(400).json({
             success: false,
             message: "Title and content are required"
         });
     }
+
 
     // Check post exists
     db.get(
@@ -225,12 +300,14 @@ router.put("/:id", (req, res) => {
                 });
             }
 
+
             if (!post) {
                 return res.status(404).json({
                     success: false,
                     message: "Post not found"
                 });
             }
+
 
             // Update post
             db.run(
@@ -254,6 +331,11 @@ router.put("/:id", (req, res) => {
                         });
                     }
 
+
+                    // Invalidate cache because data changed
+                    invalidatePostsCache();
+
+
                     res.status(200).json({
                         success: true,
                         message: "Post updated successfully"
@@ -274,12 +356,15 @@ router.delete("/:id", (req, res) => {
 
     const postId = Number(req.params.id);
 
+
+    // Validate ID
     if (!Number.isInteger(postId) || postId <= 0) {
         return res.status(400).json({
             success: false,
             message: "Invalid post ID"
         });
     }
+
 
     // Check post exists
     db.get(
@@ -296,12 +381,14 @@ router.delete("/:id", (req, res) => {
                 });
             }
 
+
             if (!post) {
                 return res.status(404).json({
                     success: false,
                     message: "Post not found"
                 });
             }
+
 
             // Delete post
             db.run(
@@ -317,6 +404,11 @@ router.delete("/:id", (req, res) => {
                             message: "Failed to delete post"
                         });
                     }
+
+
+                    // Invalidate cache because data changed
+                    invalidatePostsCache();
+
 
                     res.status(200).json({
                         success: true,
